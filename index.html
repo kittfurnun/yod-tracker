@@ -172,7 +172,7 @@ tr.top1 td.total-num,tr.top2 td.total-num,tr.top3 td.total-num{color:var(--gold)
     </div>
     <div class="action-bar">
       <div class="action-bar-left">
-        <button class="btn-secondary" id="export-btn">📥 Save & Export Excel</button>
+        <button class="btn-secondary" id="export-btn">📥 Export Excel</button>
       </div>
       <button class="btn-clear" id="clear-day-btn">🗑 ล้างข้อมูลวันนี้</button>
     </div>
@@ -307,7 +307,7 @@ function saveEntry(){
     tableData[refId].push({vendor:vendor.name,color:vendor.color,amount:parsed.a});
   }
   refInput.value='';amountInput.value='';amountInput.disabled=true;refInput.focus();
-  saveState();renderTable();renderSummary();
+  saveState();renderTable();renderSummary();autoSaveToHistory();
 }
 
 // ── Summary ───────────────────────────────────────────
@@ -333,64 +333,129 @@ function renderTable(){
     html+='<tr class="'+trClass+'"><td class="ref-id">'+id+'</td><td class="ref-name">'+REF_NAME[id]+'</td><td style="padding:0"><div class="chips-cell">'+chips+'</div></td><td class="total-num">'+(zero?'—':total.toLocaleString('th-TH'))+'</td></tr>';
   });
   var tbody=document.getElementById('tbody');tbody.innerHTML=html;
-  tbody.querySelectorAll('.cx').forEach(function(el){el.addEventListener('click',function(){tableData[+this.dataset.id].splice(+this.dataset.ei,1);saveState();renderTable();renderSummary();});});
+  tbody.querySelectorAll('.cx').forEach(function(el){
+    el.addEventListener('click',function(){
+      var id=+this.dataset.id;
+    var ei=+this.dataset.ei;
+    var amount=tableData[id][ei].amount;
+    var name=REF_NAME[id];
+    if(!confirm('ลบ '+amount+' ออกจาก "'+name+'" ใช่ไหมคะ?'))return;
+    tableData[id].splice(ei,1);
+    saveState();renderTable();renderSummary();
+    });
+  });
 }
 
 // ── Export (auto-save history) ────────────────────────
 document.getElementById('export-btn').addEventListener('click',function(){
   var sess=session==='am'?'เช้า':'เย็น';
   exportExcel(tableData,sess,thaiDate(),thaiDateFile());
-  autoSaveToHistory();
 });
 
 function exportExcel(td,sessLabel,dateLabel,dateFile){
-  var wb=XLSX.utils.book_new();
-  var ws=XLSX.utils.aoa_to_sheet([]);
-
-  // --- build vendor list for this export
   var vnames=vendors.map(function(v){return v.name;});
-
-  // Row 1: title
-  XLSX.utils.sheet_add_aoa(ws,[['ยอด '+dateLabel+' ('+sessLabel+')']],{origin:'A1'});
-
-  // Row 2: vendor summary pills  e.g. "หล้าแดง: 10255  พลอย: 150"
   var byV={};vnames.forEach(function(n){byV[n]=0;});var grand=0;
   REF_ORDER.forEach(function(id){(td[id]||[]).forEach(function(e){grand+=e.amount;if(byV[e.vendor]!==undefined)byV[e.vendor]+=e.amount;});});
+
+  var totals=REF_ORDER.map(function(id){return{id:id,total:(td[id]||[]).reduce(function(s,e){return s+e.amount;},0)};});
+  var top5ids={};totals.filter(function(x){return x.total>0;}).sort(function(a,b){return b.total-a.total;}).slice(0,5).forEach(function(x,i){top5ids[x.id]=i+1;});
+
+  var wb=new ExcelJS.Workbook();
+  wb.creator='ยอด App';
+  var ws=wb.addWorksheet('ยอด');
+  var totalCols=2+vnames.length+1;
+
+  // Row 1: Title
+  var titleRow=ws.addRow(['ยอด '+dateLabel+' ('+sessLabel+')']);
+  ws.mergeCells(1,1,1,totalCols);
+  titleRow.getCell(1).font={name:'Sarabun',size:14,bold:true,color:{argb:'FF1a1814'}};
+  titleRow.getCell(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFf0ede8'}};
+  titleRow.getCell(1).alignment={horizontal:'center',vertical:'middle'};
+  titleRow.height=24;
+
+  // Row 2: Summary
   var summaryParts=['ยอดรวม: '+grand.toLocaleString('th-TH')];
   vnames.forEach(function(n){summaryParts.push(n+': '+(byV[n]||0).toLocaleString('th-TH'));});
-  XLSX.utils.sheet_add_aoa(ws,[[summaryParts.join('   ')]],{origin:'A2'});
+  var summRow=ws.addRow([summaryParts.join('     ')]);
+  ws.mergeCells(2,1,2,totalCols);
+  summRow.getCell(1).font={name:'Sarabun',size:11,bold:true,color:{argb:'FF2d5a3d'}};
+  summRow.getCell(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFe6f0ea'}};
+  summRow.getCell(1).alignment={horizontal:'left',vertical:'middle'};
+  summRow.height=20;
 
-  // Row 3: blank
-  XLSX.utils.sheet_add_aoa(ws,[[' ']],{origin:'A3'});
+  // Row 3: spacer
+  var vcRow=ws.addRow([]);
+  ws.mergeCells(3,1,3,totalCols);
+  vcRow.height=6;
 
-  // Row 4: header  ID | ชื่อ | Vendor1 | Vendor2 | … | รวม
-  var header=['ID','ชื่อ'].concat(vnames).concat(['รวม']);
-  XLSX.utils.sheet_add_aoa(ws,[header],{origin:'A4'});
+  // Row 4: Header
+  var headerVals=['ID','ชื่อ'].concat(vnames).concat(['รวม']);
+  var hRow=ws.addRow(headerVals);
+  hRow.height=20;
+  hRow.eachCell(function(cell,ci){
+    var bgColor='FF2d5a3d';
+    if(ci===totalCols) bgColor='FF1a1814';
+    else if(ci>2&&vendors[ci-3]) bgColor='FF'+vendors[ci-3].color.slice(1);
+    cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:bgColor}};
+    cell.font={name:'Sarabun',size:11,bold:true,color:{argb:'FFFFFFFF'}};
+    cell.alignment={horizontal:ci<=2?'left':'center',vertical:'middle'};
+    cell.border={bottom:{style:'medium',color:{argb:'FFFFFFFF'}}};
+  });
 
-  // Rows 5+: data
-  var rowIdx=5;
+  // Rows 5+: Data
   REF_ORDER.forEach(function(id){
     var entries=td[id]||[];
     var total=entries.reduce(function(s,e){return s+e.amount;},0);
-    // group entries by vendor
     var byVendorExpr={};
     vnames.forEach(function(n){byVendorExpr[n]=[];});
     entries.forEach(function(e){if(byVendorExpr[e.vendor]!==undefined)byVendorExpr[e.vendor].push(e.amount);});
-    var row=[id,REF_NAME[id]];
-    vnames.forEach(function(n){var arr=byVendorExpr[n];row.push(arr.length?arr.join('+'):'');});
-    row.push(total||'');
-    XLSX.utils.sheet_add_aoa(ws,[row],{origin:'A'+rowIdx});
-    rowIdx++;
+    var rowVals=[id,REF_NAME[id]];
+    vnames.forEach(function(n){var arr=byVendorExpr[n];rowVals.push(arr.length?arr.join('+'):'');});
+    rowVals.push(total||'');
+    var dRow=ws.addRow(rowVals);
+    dRow.height=18;
+    var rank=top5ids[id];
+    var top5bg=['FFFFF9e0','FFfefaf0','FFfef9f0','FFfdfaf5','FFfdfaf5'];
+    var rowBg=rank?top5bg[rank-1]:'FFFFFFFF';
+    dRow.eachCell(function(cell,ci){
+      cell.font={name:'Sarabun',size:11,bold:ci===rowVals.length&&rank,
+        color:{argb:ci===rowVals.length&&rank?'FFb8860b':'FF1a1814'}};
+      cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:rowBg}};
+      cell.alignment={horizontal:ci<=2?'left':'center',vertical:'middle'};
+      if(ci>2&&ci<rowVals.length&&vnames[ci-3]){
+        var vo=vendors.find(function(v){return v.name===vnames[ci-3];});
+        if(vo&&byVendorExpr[vnames[ci-3]]&&byVendorExpr[vnames[ci-3]].length)
+          cell.font={name:'Sarabun',size:11,bold:true,color:{argb:'FF'+vo.color.slice(1)}};
+      }
+      cell.border={
+        top:{style:'thin',color:{argb:'FFe2ddd6'}},
+        bottom:{style:'thin',color:{argb:'FFe2ddd6'}},
+        left:{style:'thin',color:{argb:'FFe2ddd6'}},
+        right:{style:'thin',color:{argb:'FFe2ddd6'}}
+      };
+    });
+    if(rank){
+      var medals=['🥇','🥈','🥉','④','⑤'];
+      dRow.getCell(2).value=medals[rank-1]+' '+REF_NAME[id];
+    }
   });
 
-  // column widths
-  ws['!cols']=[{wch:5},{wch:12}].concat(vnames.map(function(){return{wch:22};})).concat([{wch:8}]);
-  // merge title row across all columns
-  var totalCols=header.length;
-  ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:totalCols-1}},{s:{r:1,c:0},e:{r:1,c:totalCols-1}},{s:{r:2,c:0},e:{r:2,c:totalCols-1}}];
+  // Column widths & freeze
+  ws.getColumn(1).width=6;
+  ws.getColumn(2).width=14;
+  vnames.forEach(function(v,i){ws.getColumn(3+i).width=24;});
+  ws.getColumn(totalCols).width=10;
+  ws.views=[{state:'frozen',ySplit:4}];
 
-  XLSX.utils.book_append_sheet(wb,ws,'ยอด');
-  XLSX.writeFile(wb,'ยอด_'+dateFile+'-'+sessLabel+'.xlsx');
+  // Download
+  wb.xlsx.writeBuffer().then(function(buffer){
+    var blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;a.download='ยอด_'+dateFile+'-'+sessLabel+'.xlsx';
+    document.body.appendChild(a);a.click();
+    document.body.removeChild(a);URL.revokeObjectURL(url);
+  });
 }
 
 // ── Auto-save to history ──────────────────────────────
@@ -514,6 +579,7 @@ function hexAlpha(hex,a){var r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(
 document.getElementById('clear-day-btn').addEventListener('click',function(){
   if(!confirm('ล้างข้อมูลวันนี้ทั้งหมดใช่ไหมครับ?'))return;
   REF_ORDER.forEach(function(id){tableData[id]=[];});saveState();renderTable();renderSummary();
+  
 });
 
 // ── Init ──────────────────────────────────────────────
