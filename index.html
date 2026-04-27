@@ -207,6 +207,21 @@ tr.top1 td.total-num,tr.top2 td.total-num,tr.top3 td.total-num{color:var(--gold)
   </div>
 </div>
 
+  <!-- Edit vendor dialog -->
+<div class="overlay" id="edit-vendor-overlay">
+  <div class="dialog">
+    <h3>แก้ไข Vendor</h3>
+    <label style="font-size:12px;color:var(--text2);font-weight:500">ชื่อ</label>
+    <input type="text" id="edit-vendor-name" style="margin-top:6px"/>
+    <label style="font-size:12px;color:var(--text2);font-weight:500">สี</label>
+    <div id="color-picker" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 16px"></div>
+    <div class="foot">
+      <button id="edit-vendor-cancel">ยกเลิก</button>
+      <button class="ok" id="edit-vendor-confirm">บันทึก</button>
+    </div>
+  </div>
+</div>
+
 <script>
 var REF_ORDER=[1,18,5,2,3,36,4,16,6,28,32,7,20,8,9,14,25,10,11,27,33,12,13,26,31,15,17,19,21,35,22,23,24,29,30,34];
 var REF_NAME={1:'วอก',18:'ปลาคำ',5:'แหวน',2:'กระต่าย',3:'ปลาเงิน',36:'ใส้เดือน',4:'ก๋าแก๋',16:'นกแดง',6:'ไก่',28:'ปลาไหล',32:'กว๋าง',7:'แม่ชี',20:'ช้าง',8:'เห็น',9:'หมา',14:'หนู',25:'วัว',10:'กำปุ้ง',11:'เต่า',27:'ผีเสื้อ',33:'งู',12:'เป็ด',13:'ม้า',26:'นกยูง',31:'ผึ้ง',15:'หอย',17:'แมว',19:'สิงโต',21:'ปู',35:'นาค',22:'แพะ',23:'ก๋าดำ',24:'เสือ',29:'นกยาง',30:'กบ',34:'หมู'};
@@ -256,6 +271,7 @@ function renderVendors(){
     var sel=selectedVendor===i;
     return '<span class="vendor-chip'+(sel?' selected':'')+'" data-vi="'+i+'" style="color:'+v.color+';border-color:'+(sel?v.color:'transparent')+'">'
       +'<span style="width:10px;height:10px;border-radius:50%;background:'+v.color+';flex-shrink:0;display:inline-block"></span> '+v.name
+      +'<span class="edit-v" data-evi="'+i+'" title="แก้ไข">✏️</span>'
       +'<span class="del-v" data-dvi="'+i+'">✕</span></span>';
   }).join('');
   renderSummary();
@@ -263,13 +279,64 @@ function renderVendors(){
 document.getElementById('vendor-list').addEventListener('click',function(e){
   var del=e.target.closest('.del-v');
   if(del){var i=+del.dataset.dvi;if(!confirm('ลบ vendor "'+vendors[i].name+'" ?'))return;var name=vendors[i].name;vendors.splice(i,1);if(selectedVendor===i)selectedVendor=vendors.length?0:null;else if(selectedVendor>i)selectedVendor--;REF_ORDER.forEach(function(id){tableData[id]=tableData[id].filter(function(e){return e.vendor!==name;});});saveState();renderVendors();renderTable();return;}
-  var chip=e.target.closest('.vendor-chip');if(chip){selectedVendor=+chip.dataset.vi;saveState();renderVendors();}
+  var edit=e.target.closest('.edit-v');
+if(edit){openEditVendor(+edit.dataset.evi);return;}
+var chip=e.target.closest('.vendor-chip');if(chip){selectedVendor=+chip.dataset.vi;saveState();renderVendors();}
 });
 document.getElementById('add-vendor-btn').addEventListener('click',function(){document.getElementById('vendor-name-input').value='';document.getElementById('vendor-overlay').classList.add('open');setTimeout(function(){document.getElementById('vendor-name-input').focus();},50);});
 document.getElementById('vendor-cancel').addEventListener('click',function(){document.getElementById('vendor-overlay').classList.remove('open');});
 document.getElementById('vendor-confirm').addEventListener('click',addVendor);
 document.getElementById('vendor-name-input').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addVendor();}if(e.key==='Escape')document.getElementById('vendor-overlay').classList.remove('open');});
-function addVendor(){var name=document.getElementById('vendor-name-input').value.trim();if(!name)return;if(vendors.find(function(v){return v.name===name;})){alert('มี vendor นี้แล้ว');return;}vendors.push({name:name,color:COLORS[vendors.length%COLORS.length]});if(selectedVendor===null)selectedVendor=0;document.getElementById('vendor-overlay').classList.remove('open');saveState();renderVendors();renderTable();}
+var editVendorIdx=null;
+var COLORS_ALL=['#e05252','#4a90d9','#2daa6e','#e0992a','#9b59b6','#16a085','#c0392b','#2980b9','#e67e22','#1abc9c','#8e44ad','#2c3e50'];
+
+function openEditVendor(i){
+  editVendorIdx=i;
+  document.getElementById('edit-vendor-name').value=vendors[i].name;
+  // render color swatches
+  var cp=document.getElementById('color-picker');
+  cp.innerHTML=COLORS_ALL.map(function(c){
+    var selected=vendors[i].color===c;
+    return '<span data-c="'+c+'" style="width:28px;height:28px;border-radius:50%;background:'+c+';cursor:pointer;display:inline-block;border:3px solid '+(selected?'#1a1814':'transparent')+';transition:border .15s"></span>';
+  }).join('');
+  cp.querySelectorAll('span').forEach(function(el){
+    el.addEventListener('click',function(){
+      cp.querySelectorAll('span').forEach(function(s){s.style.border='3px solid transparent';});
+      this.style.border='3px solid #1a1814';
+    });
+  });
+  document.getElementById('edit-vendor-overlay').classList.add('open');
+  setTimeout(function(){document.getElementById('edit-vendor-name').focus();},50);
+}
+
+document.getElementById('edit-vendor-cancel').addEventListener('click',function(){
+  document.getElementById('edit-vendor-overlay').classList.remove('open');
+});
+document.getElementById('edit-vendor-confirm').addEventListener('click',function(){
+  if(editVendorIdx===null)return;
+  var newName=document.getElementById('edit-vendor-name').value.trim();
+  if(!newName)return;
+  var selectedSwatch=document.querySelector('#color-picker span[style*="1a1814"]');
+  var newColor=selectedSwatch?selectedSwatch.dataset.c:vendors[editVendorIdx].color;
+  var oldName=vendors[editVendorIdx].name;
+  // update entries ที่ใช้ชื่อ vendor เดิม
+  REF_ORDER.forEach(function(id){
+    tableData[id].forEach(function(e){
+      if(e.vendor===oldName){e.vendor=newName;e.color=newColor;}
+    });
+  });
+  vendors[editVendorIdx].name=newName;
+  vendors[editVendorIdx].color=newColor;
+  document.getElementById('edit-vendor-overlay').classList.remove('open');
+  saveState();renderVendors();renderTable();renderSummary();
+});
+document.getElementById('edit-vendor-name').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){e.preventDefault();document.getElementById('edit-vendor-confirm').click();}
+  if(e.key==='Escape')document.getElementById('edit-vendor-overlay').classList.remove('open');
+});
+  
+  function addVendor(){
+  var name=document.getElementById('vendor-name-input').value.trim();if(!name)return;if(vendors.find(function(v){return v.name===name;})){alert('มี vendor นี้แล้ว');return;}vendors.push({name:name,color:COLORS[vendors.length%COLORS.length]});if(selectedVendor===null)selectedVendor=0;document.getElementById('vendor-overlay').classList.remove('open');saveState();renderVendors();renderTable();}
 
 // ── Session ───────────────────────────────────────────
 document.getElementById('btn-am').addEventListener('click',function(){setSession('am');});
